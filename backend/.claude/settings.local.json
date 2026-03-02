@@ -1,0 +1,10 @@
+{
+  "enabledPlugins": {
+    "api-scaffolding@claude-code-workflows": true,
+    "backend-api-security@claude-code-workflows": true,
+    "backend-development@claude-code-workflows": true,
+    "data-engineering@claude-code-workflows": true,
+    "database-cloud-optimization@claude-code-workflows": true,
+    "database-design@claude-code-workflows": true
+  }
+}
