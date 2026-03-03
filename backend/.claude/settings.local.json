@@ -5,6 +5,12 @@
     "backend-development@claude-code-workflows": true,
     "data-engineering@claude-code-workflows": true,
     "database-cloud-optimization@claude-code-workflows": true,
-    "database-design@claude-code-workflows": true
+    "database-design@claude-code-workflows": true,
+    "api-testing-observability@claude-code-workflows": true,
+    "database-migrations@claude-code-workflows": true,
+    "llm-application-dev@claude-code-workflows": true,
+    "systems-programming@claude-code-workflows": true,
+    "distributed-debugging@claude-code-workflows": true,
+    "data-validation-suite@claude-code-workflows": true
   }
 }

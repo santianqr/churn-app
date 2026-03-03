@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "ui-design@claude-code-workflows": true,
+    "seo-technical-optimization@claude-code-workflows": true,
+    "seo-content-creation@claude-code-workflows": true,
+    "seo-analysis-monitoring@claude-code-workflows": true,
+    "javascript-typescript@claude-code-workflows": true,
+    "frontend-design@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true
+  }
+}
