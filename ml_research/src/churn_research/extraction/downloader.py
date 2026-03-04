@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from churn_research.config.settings import SnowflakeSettings
 from churn_research.extraction.client import SnowflakeClient
 from churn_research.extraction.parquet_writer import ParquetExporter
 from churn_research.extraction.query_builder import (
@@ -12,21 +12,31 @@ from churn_research.extraction.query_builder import (
     build_select,
 )
 
+if TYPE_CHECKING:
+    from churn_research.config.settings import SnowflakeSettings
+
 logger = logging.getLogger(__name__)
+
+
+class DownloadError(Exception):
+    """Raised when one or more partitions fail to download."""
+
+    def __init__(self, failures: list[str]) -> None:
+        self.failures = failures
+        super().__init__(f"{len(failures)} partition(s) failed: {', '.join(failures)}")
 
 
 class SnowflakeDownloader:
     """Orchestrates Snowflake data extraction to Parquet files."""
 
-    def __init__(self, settings: SnowflakeSettings | None = None) -> None:
-        self._settings = settings or SnowflakeSettings()
+    def __init__(self, settings: SnowflakeSettings) -> None:
+        self._settings = settings
         self._exporter = ParquetExporter()
 
     def download(
         self,
         spec: QuerySpec,
         output_dir: str | Path = "data/raw",
-        partition_freq: str = "month",
     ) -> list[Path]:
         """Download data from Snowflake to Parquet files.
 
@@ -34,18 +44,19 @@ class SnowflakeDownloader:
         Otherwise, downloads everything into a single file.
 
         Returns list of created Parquet file paths.
+
+        Raises:
+            DownloadError: If any partition fails during partitioned download.
         """
         output_dir = Path(output_dir)
-        created_files: list[Path] = []
 
         with SnowflakeClient(self._settings) as client:
             if spec.date_column and spec.start_date and spec.end_date:
-                created_files = self._download_partitioned(client, spec, output_dir, partition_freq)
+                created_files = self._download_partitioned(client, spec, output_dir)
             else:
                 created_files = self._download_single(client, spec, output_dir)
 
-        total_files = len(created_files)
-        logger.info("Download complete: %d file(s) created in %s", total_files, output_dir)
+        logger.info("Download complete: %d file(s) created in %s", len(created_files), output_dir)
         return created_files
 
     def _download_partitioned(
@@ -53,10 +64,10 @@ class SnowflakeDownloader:
         client: SnowflakeClient,
         spec: QuerySpec,
         output_dir: Path,
-        freq: str,
     ) -> list[Path]:
-        queries = build_partitioned_queries(spec, freq=freq)
+        queries = build_partitioned_queries(spec)
         created: list[Path] = []
+        failures: list[str] = []
 
         logger.info("Starting partitioned download: %d partitions", len(queries))
 
@@ -72,17 +83,17 @@ class SnowflakeDownloader:
 
             try:
                 batches = client.execute_arrow_batches(sql)
-                rows = self._exporter.write_batches(
-                    batches,
-                    output_path,
-                    column_renames=spec.column_aliases or None,
-                )
+                rows = self._exporter.write_batches(batches, output_path, column_renames=spec.column_aliases or None)
                 if rows > 0:
                     created.append(output_path)
                 else:
                     logger.info("[%d/%d] Partition %s is empty, skipping", i, len(queries), label)
             except Exception:
                 logger.exception("[%d/%d] Failed to download partition %s", i, len(queries), label)
+                failures.append(label)
+
+        if failures:
+            raise DownloadError(failures)
 
         return created
 
@@ -98,11 +109,7 @@ class SnowflakeDownloader:
 
         sql = build_select(spec)
         batches = client.execute_arrow_batches(sql)
-        rows = self._exporter.write_batches(
-            batches,
-            output_path,
-            column_renames=spec.column_aliases or None,
-        )
+        rows = self._exporter.write_batches(batches, output_path, column_renames=spec.column_aliases or None)
 
         if rows > 0:
             return [output_path]

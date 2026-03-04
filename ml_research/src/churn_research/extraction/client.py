@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
 from typing import TYPE_CHECKING
 
 import snowflake.connector
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from types import TracebackType
+
     import pyarrow as pa
 
     from churn_research.config.settings import SnowflakeSettings
@@ -26,7 +28,12 @@ class SnowflakeClient:
         self._conn = snowflake.connector.connect(**self._settings.connection_params())
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         if self._conn:
             self._conn.close()
             logger.info("Snowflake connection closed")
@@ -38,24 +45,16 @@ class SnowflakeClient:
             raise RuntimeError(msg)
         return self._conn
 
-    def execute_arrow_batches(self, sql: str) -> Generator[pa.RecordBatch]:
-        """Execute a query and yield Arrow RecordBatches for streaming."""
+    def execute_arrow_batches(self, sql: str) -> Iterator[pa.RecordBatch]:
+        """Execute a query and yield Arrow batches for streaming."""
         logger.info("Executing query: %.120s...", sql)
-        cursor = self.connection.cursor()
-        try:
+        with self.connection.cursor() as cursor:
             cursor.execute(sql)
-            batches = cursor.fetch_arrow_batches()
-            for batch in batches:
-                yield batch
-        finally:
-            cursor.close()
+            yield from cursor.fetch_arrow_batches()
 
     def execute_count(self, sql: str) -> int:
         """Execute a COUNT query and return the result."""
-        cursor = self.connection.cursor()
-        try:
+        with self.connection.cursor() as cursor:
             cursor.execute(sql)
             row = cursor.fetchone()
-            return row[0] if row else 0
-        finally:
-            cursor.close()
+            return int(row[0]) if row else 0

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+import os
 from pathlib import Path
+import tempfile
+from typing import TYPE_CHECKING, Literal
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ParquetExporter:
     """Streams Arrow batches to a Parquet file with zstd compression."""
 
-    def __init__(self, compression: str = "zstd") -> None:
+    def __init__(self, compression: Literal["zstd", "snappy", "gzip", "lz4", "none"] = "zstd") -> None:
         self._compression = compression
 
     def write_batches(
@@ -27,10 +32,20 @@ class ParquetExporter:
 
         writer: pq.ParquetWriter | None = None
         total_rows = 0
+        tmp_fd = None
+        tmp_path: Path | None = None
 
         try:
+            tmp_fd, tmp_path_str = tempfile.mkstemp(
+                suffix=".parquet.tmp",
+                dir=str(output_path.parent),
+            )
+            # Close fd immediately — ParquetWriter opens the file by name
+            os.close(tmp_fd)
+            tmp_fd = None
+            tmp_path = Path(tmp_path_str)
+
             for chunk in batches:
-                # fetch_arrow_batches() can return Table or RecordBatch
                 table = chunk if isinstance(chunk, pa.Table) else pa.Table.from_batches([chunk])
 
                 if column_renames:
@@ -38,21 +53,34 @@ class ParquetExporter:
                     table = table.rename_columns(new_names)
 
                 if writer is None:
-                    writer = pq.ParquetWriter(
-                        str(output_path),
-                        schema=table.schema,
-                        compression=self._compression,
-                    )
+                    writer = pq.ParquetWriter(str(tmp_path), schema=table.schema, compression=self._compression)
 
                 writer.write_table(table)
                 total_rows += table.num_rows
 
-                if total_rows % 500_000 < table.num_rows:
+                prev_rows = total_rows - table.num_rows
+                if total_rows // 500_000 != prev_rows // 500_000:
                     logger.info("  ... %s rows written", f"{total_rows:,}")
+
+            if writer is not None:
+                writer.close()
+                writer = None
+
+            # Atomic rename on success
+            tmp_path.replace(output_path)
+            tmp_path = None
+
+            logger.info("Wrote %s rows to %s", f"{total_rows:,}", output_path)
 
         finally:
             if writer is not None:
                 writer.close()
+            if tmp_fd is not None:
+                os.close(tmp_fd)
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
 
-        logger.info("Wrote %s rows to %s", f"{total_rows:,}", output_path)
         return total_rows
